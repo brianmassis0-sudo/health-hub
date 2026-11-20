@@ -70,6 +70,20 @@
   .coach li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; font-size: 13.5px; color: var(--text-secondary); }
   .coach li b { color: var(--text-primary); font-weight: 600; }
   .coach .note { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
+  .coach-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; margin-top: 4px; }
+  @media (max-width: 760px) { .coach-grid { grid-template-columns: minmax(0, 1fr); } }
+  .coach-lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 6px; }
+  .chk { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; font-size: 13.5px; color: var(--text-primary); cursor: pointer; border-bottom: 1px solid var(--grid); }
+  .chk input { margin-top: 2px; accent-color: var(--series-1); width: 16px; height: 16px; flex: none; }
+  .chk input:checked + span { color: var(--text-muted); text-decoration: line-through; }
+  .hint { font-size: 12.5px; color: var(--text-secondary); margin-top: 8px; }
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .wk { text-align: center; border: 1px solid var(--border); border-radius: 8px; padding: 6px 0; }
+  .wk.today { border-color: var(--text-primary); }
+  .wk-d { font-size: 11px; color: var(--text-muted); } .wk-i { font-size: 15px; } .wk-m { font-size: 12px; color: var(--text-secondary); min-height: 16px; }
+  .macros { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .macros div { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; }
+  .macros b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; } .macros span { font-size: 11px; color: var(--text-muted); }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -210,54 +224,120 @@ function renderTiles(days) {
     tile('Body Battery', 'body_battery', v => fmtN(v));
 }
 
-/* ---------- coaching ---------- */
+/* ---------- coaching: Stunna's weekly hybrid split ---------- */
+const ZONES = { z1: [123, 137], z2: [138, 153], z3: [154, 168], z4: [169, 183], z5: [184, 198] };
+const MACROS = { kcal: 1950, protein: 170, carbs: 204, fat: 51 };
+const PLAN = {
+  1: { title: 'Upper Strength + Zone 2 Run', icon: '💪', type: 'strength', heavy: true, time: 'Heavy · 50–55 min',
+       items: ['Flat Barbell Bench Press 3×5–8 · 120s', 'Pull-ups / Lat Pulldown 3×6–8 · 90s', 'Incline Barbell Press 3×8–10 · 90s', 'Seated Cable Row 3×8–10 · 90s', 'DB Lateral Raises 3×12–15 · 45s', 'Hammer Curls 2×10–12 · 45s', 'Rope Triceps Pushdowns 2×10–12 · 45s'],
+       run: '25–30 min Zone 2 (138–153 bpm)' },
+  2: { title: 'HYROX (hard)', icon: '🔥', type: 'hyrox', hard: true, time: "Stunna's class",
+       items: ['HYROX class', 'Running transitions', 'Sled / SkiErg / Row / Wall Balls'], hr: 'Zone 3–4 (154–183 bpm) on hard aerobic parts' },
+  3: { title: 'Lower Strength', icon: '🦵', type: 'strength', time: 'Moderate-heavy · 45–50 min · 2–3 RIR',
+       items: ['Squat / Leg Press 3×6–8 · 120s', 'Romanian Deadlift 3×8–10 · 90s', 'Bulgarian Split Squat 2×8/leg · 75s', 'Seated Leg Curl 2×10–12 · 60s', 'Standing Calf Raises 3×12–15 · 45s', 'Hanging Knee Raises 2×12–15 · 45s'] },
+  4: { title: 'HYROX (controlled)', icon: '⚡', type: 'hyrox', time: "Stunna's class",
+       items: ['HYROX class', 'Technique + efficient transitions', 'Controlled intensity'], hr: 'Mostly Zone 2–3 (138–168 bpm)' },
+  5: { title: 'Upper Hypertrophy + Zone 2 Run', icon: '💪', type: 'strength', time: 'Medium-heavy · 50 min',
+       items: ['Incline Barbell Press 3×8–12 · 75s', 'Wide-Grip Lat Pulldown 3×10–12 · 75s', 'Machine Chest Press 3×10–12 · 60s', 'Seated Cable Row 3×10–12 · 60s', 'DB Lateral Raises 3×12–15 · 45s', 'Cable Biceps Curls 2×10–12 · 45s', 'Rope Triceps Pushdowns 2×10–12 · 45s'],
+       run: '30–40 min Zone 2 (138–153 bpm)' },
+  6: { title: 'HYROX (race effort)', icon: '🏁', type: 'hyrox', hard: true, time: "Stunna's class",
+       items: ['HYROX class', 'Sustained race effort', 'Running consistency + station technique'], hr: 'Zone 3–4 (154–183 bpm) on hard aerobic parts' },
+  0: { title: 'Rest', icon: '😴', type: 'rest', time: 'Recovery',
+       items: ['Optional walk / mobility', 'Prep for next week'] },
+};
+const isLift = w => /strength|weight|lift|gym/i.test(w.sport || '');
+const isHyrox = w => /hyrox|hiit|functional|crossfit|cardio|bootcamp|circuit|ski|row|sled/i.test(w.sport || '');
+const isRun = w => /run/i.test(w.sport || '');
+
+function adjustFor(plan, level) {
+  if (plan.type === 'rest') return level === 'bad' ? 'Full rest. Sleep in and keep the walk easy.' : 'Rest day. An easy walk or mobility is fine; no extra training.';
+  if (plan.type === 'strength') {
+    if (level === 'good') return `Go for the top of your rep ranges${plan.heavy ? ' and add weight on bench if you hit 3×8 last week' : ''}. Keep 1–2 reps in reserve on compounds.`;
+    if (level === 'warn') return 'Keep last week\'s weights and stop at 2–3 reps in reserve. Skip the last set of each accessory if you feel flat.';
+    return 'Low recovery: do only the first 2–3 lifts at ~70% of normal weight, or swap the session for 30 min of easy Zone 1–2 cardio plus mobility.';
+  }
+  if (plan.type === 'hyrox') {
+    if (level === 'good') return plan.hard ? 'Green light for a hard session. Push the stations and hold Zone 3–4 on the runs.' : 'Stick to the plan: smooth, technique-focused, mostly Zone 2–3.';
+    if (level === 'warn') return plan.hard ? 'Go to class but treat it like Thursday: controlled, mostly Zone 2–3, and don\'t chase the leaderboard.' : 'Good as planned. Keep it controlled.';
+    return `Low recovery: go technique-only and keep your HR under ${ZONES.z2[1]} bpm, or skip and walk 30–40 min instead.`;
+  }
+  return '';
+}
+
+function runAdjust(level) {
+  if (level === 'bad') return 'Shorten to 20 min, or swap for a brisk walk.';
+  return `Keep it conversational, HR ${ZONES.z2[0]}–${ZONES.z2[1]} bpm. Slow down or walk the hills if you drift above.`;
+}
+
+function weekStrip(workouts) {
+  const now = new Date(), dow = now.getDay(), mon = new Date(now); mon.setDate(now.getDate() - ((dow + 6) % 7));
+  const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let done = 0, due = 0;
+  const cells = names.map((nm, i) => {
+    const d = new Date(mon); d.setDate(mon.getDate() + i); const ds = localISO(d), wd = d.getDay(), p = PLAN[wd];
+    const ws = mergeWorkouts((workouts || []).filter(w => w.date === ds));
+    let ok = false;
+    if (p.type === 'strength') ok = ws.some(isLift) || ws.some(w => !isRun(w) && !isHyrox(w));
+    else if (p.type === 'hyrox') ok = ws.some(isHyrox) || ws.some(w => !isLift(w));
+    const isToday = ds === localISO(now), future = d > now && !isToday;
+    if (p.type !== 'rest' && !future) { due++; if (ok) done++; }
+    const mark = p.type === 'rest' ? '😴' : ok ? '✅' : future || isToday ? '·' : '—';
+    return `<div class="wk${isToday ? ' today' : ''}" title="${p.title}"><div class="wk-d">${nm}</div><div class="wk-i">${p.icon}</div><div class="wk-m">${mark}</div></div>`;
+  }).join('');
+  return { html: `<div class="week">${cells}</div>`, done, due };
+}
+
 function renderCoach(all, workouts) {
-  const days = all, n = days.length;
-  if (!n) { $('coach').innerHTML = '<div class="coach-sum">No data yet. Advice appears after your first sync.</div>'; return; }
-  const today = days[n - 1];
-  const lastWith = k => { for (let i = n - 1; i >= 0; i--) if (days[i][k] != null) return days[i][k]; return null; };
-  const win = (k, from, to) => avg(days.slice(Math.max(0, n - from), n - to).map(d => d[k]));
+  const n = all.length, now = new Date(), today = localISO(now), plan = PLAN[now.getDay()];
+  const lastWith = k => { for (let i = n - 1; i >= 0; i--) if (all[i][k] != null) return all[i][k]; return null; };
+  const win = (k, from, to) => avg(all.slice(Math.max(0, n - from), n - to).map(d => d[k]));
   const rec = lastWith('recovery'), hrv = lastWith('hrv'), rhr = lastWith('rhr');
   const hrvBase = win('hrv', 31, 1), rhrBase = win('rhr', 31, 1);
   const sleep7 = win('sleep_min', 7, 0), sleepLast = lastWith('sleep_min');
   const strain7 = win('strain', 7, 0), strain30 = win('strain', 30, 0);
-  const steps7 = win('steps', 7, 0);
-  const hrvLow3 = hrvBase != null && days.slice(-3).filter(d => d.hrv != null && d.hrv < hrvBase * 0.9).length >= 3;
+  const hrvLow3 = hrvBase != null && all.slice(-3).filter(d => d.hrv != null && d.hrv < hrvBase * 0.9).length >= 3;
+  const rhrHigh = rhr != null && rhrBase != null && rhr >= rhrBase + 3;
 
-  const wk = new Date(); wk.setDate(wk.getDate() - 7); const wkCut = localISO(wk);
-  const recent = mergeWorkouts((workouts || []).filter(w => (w.date || '') > wkCut));
-  const isLift = w => /strength|weight|lift|gym|functional|hiit|crossfit/i.test(w.sport || '');
-  const isRacquet = w => /tennis|padel|pickle|squash|racquet|badminton/i.test(w.sport || '');
-  const lifts = recent.filter(isLift).length, courts = recent.filter(isRacquet).length;
+  let score = rec != null ? rec : (hrv != null && hrvBase ? (hrv >= hrvBase ? 70 : hrv >= hrvBase * 0.9 ? 50 : 25) : null);
+  let level = score == null ? 'warn' : score >= 67 ? 'good' : score >= 34 ? 'warn' : 'bad';
+  if (level === 'good' && (hrvLow3 || rhrHigh)) level = 'warn';   // strong warning signs cap a green day
+  const badge = { good: '▲ Green: push', warn: '● Yellow: controlled', bad: '▼ Red: recover' }[level];
+  const color = level === 'good' ? css('--good') : level === 'bad' ? css('--bad') : css('--warn');
 
-  // Headline from recovery (fallback: HRV vs baseline)
-  let level, head, sum;
-  const score = rec != null ? rec : (hrv != null && hrvBase ? (hrv >= hrvBase ? 70 : hrv >= hrvBase * 0.9 ? 50 : 25) : null);
-  if (score == null) { level = 'warn'; head = 'Not enough data'; sum = 'Sync a few more days for personal advice.'; }
-  else if (score >= 67) { level = 'good'; head = '▲ Push day'; sum = 'Your body is ready for hard work. Good day for a heavy lift or a competitive tennis/padel match.'; }
-  else if (score >= 34) { level = 'warn'; head = '● Moderate day'; sum = 'Train, but keep it controlled: a normal lift without grinding to failure, or a drills-focused hit instead of a long match.'; }
-  else { level = 'bad'; head = '▼ Recovery day'; sum = 'Your body is still recovering. Swap intense training for a 30–45 min walk, mobility, or a light rally, and protect tonight\'s sleep.'; }
+  // checklist state (per day, this device only)
+  const key = 'hh_done_' + today;
+  let checked = {}; try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) {}
+  const items = [...plan.items, ...(plan.run ? ['🏃 Run: ' + plan.run] : [])];
+  const list = items.map((t, i) => `<label class="chk"><input type="checkbox" data-i="${i}" ${checked[i] ? 'checked' : ''}><span>${t}</span></label>`).join('');
 
   const tips = [];
-  if (hrvLow3) tips.push(['📉', `<b>HRV has been below your normal for 3+ days</b> (${fmtN(hrvBase)} ms avg). Common causes: hard training stacked up, short sleep, alcohol, or getting sick. Ease off for a day or two.`]);
-  else if (hrv != null && hrvBase != null && hrv > hrvBase * 1.1) tips.push(['📈', `<b>HRV is above your normal</b> (${fmtN(hrv)} vs ${fmtN(hrvBase)} ms), a sign you've recovered well.`]);
-  if (rhr != null && rhrBase != null && rhr >= rhrBase + 3) tips.push(['❤️', `<b>Resting HR is up ${fmtN(rhr - rhrBase)} bpm</b> from your usual. That often follows drinking, a late meal, dehydration or an oncoming cold. Hydrate and go easier today.`]);
-  if (sleep7 != null && sleep7 < 420) tips.push(['😴', `<b>You're averaging ${fmtH(sleep7)} of sleep this week.</b> For fat loss and recovery aim for 7.5h+. Short sleep raises hunger and makes holding muscle in a deficit harder.`]);
-  else if (sleepLast != null && sleepLast < 390) tips.push(['😴', `<b>Short night (${fmtH(sleepLast)}).</b> Try to get to bed 30–45 min earlier tonight.`]);
-  if (strain7 != null && strain30 != null && strain7 > strain30 * 1.2 && (score ?? 100) < 67) tips.push(['⚠️', `<b>Training load is climbing faster than you're recovering</b> (7-day strain ${fmtN(strain7, 1)} vs ${fmtN(strain30, 1)} usual). Plan a lighter day soon.`]);
-  if (lifts < 4) {
-    const left = 4 - lifts;
-    tips.push(['🏋️', `<b>Lifting: ${lifts}/4 sessions in the last 7 days.</b> ${score != null && score >= 34 ? `Today is a good day for one${left > 1 ? ` (${left} to go)` : ''}.` : 'Get the next one in when recovery is back up.'}`]);
-  } else tips.push(['🏋️', `<b>Lifting: ${lifts}/4 this week.</b> Target hit, nice work.`]);
-  if (courts >= 3 && lifts >= 3 && (score ?? 100) < 50) tips.push(['🎾', `<b>${courts} court sessions plus ${lifts} lifts this week.</b> On low days, put lower-body lifts away from match days.`]);
-  if (steps7 != null && steps7 < 8000) tips.push(['🚶', `<b>Steps are averaging ${fmtN(steps7)}/day.</b> A daily 20–30 min walk is an easy fat-loss win that doesn't hurt recovery.`]);
+  if (hrvLow3) tips.push(['📉', `<b>HRV has been below your normal for 3+ days</b> (normal ≈ ${fmtN(hrvBase)} ms). Hard sessions stacked up, short sleep or alcohol are common causes. Keep today controlled.`]);
+  if (rhrHigh) tips.push(['❤️', `<b>Resting HR is up ${fmtN(rhr - rhrBase)} bpm</b> from your usual. That often follows drinking, a late meal, dehydration or an oncoming cold. Hydrate and hold back on intensity.`]);
+  if (sleep7 != null && sleep7 < 420) tips.push(['😴', `<b>Sleep is averaging ${fmtH(sleep7)} this week.</b> Your plan calls for 7–9h. Short sleep hurts HYROX performance and muscle gain in a deficit.`]);
+  else if (sleepLast != null && sleepLast < 390) tips.push(['😴', `<b>Short night (${fmtH(sleepLast)}).</b> Aim for bed 30–45 min earlier tonight.`]);
+  if (strain7 != null && strain30 != null && strain7 > strain30 * 1.2 && level !== 'good') tips.push(['⚠️', `<b>Load is climbing faster than recovery</b> (7-day strain ${fmtN(strain7, 1)} vs ${fmtN(strain30, 1)} usual). Consider making the next HYROX a controlled one.`]);
+  const wk = weekStrip(workouts);
 
-  const color = level === 'good' ? css('--good') : level === 'bad' ? css('--bad') : css('--warn');
-  $('coach').innerHTML = `<div class="coach-head"><h2>Today's plan</h2><span class="badge" style="color:${color}">${head}</span>
-    <span class="sub">${rec != null ? `Recovery ${fmtN(rec)}%` : ''}${hrv != null ? ` · HRV ${fmtN(hrv)} ms` : ''}${sleepLast != null ? ` · Sleep ${fmtH(sleepLast)}` : ''}</span></div>
-    <div class="coach-sum">${sum}</div>
-    <ul>${tips.slice(0, 5).map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul>
-    <div class="note">General guidance from your trends, not medical advice.</div>`;
+  $('coach').innerHTML = `
+    <div class="coach-head"><h2>${plan.icon} Today: ${plan.title}</h2><span class="badge" style="color:${color}">${badge}</span></div>
+    <div class="sub" style="margin-top:2px">${plan.time}${rec != null ? ` · Recovery ${fmtN(rec)}%` : ''}${hrv != null ? ` · HRV ${fmtN(hrv)} ms` : ''}${sleepLast != null ? ` · Slept ${fmtH(sleepLast)}` : ''}</div>
+    <div class="coach-sum">${score == null ? 'Sync a few days of data for recovery-based adjustments. Follow the plan as written for now.' : adjustFor(plan, level)}</div>
+    <div class="coach-grid">
+      <div><div class="coach-lbl">Session checklist</div>${list}
+        ${plan.run ? `<div class="hint">🏃 ${runAdjust(level)}</div>` : ''}${plan.hr ? `<div class="hint">❤️ ${plan.hr}</div>` : ''}</div>
+      <div>
+        <div class="coach-lbl">This week · ${wk.done}/${wk.due} sessions done so far</div>${wk.html}
+        <div class="coach-lbl" style="margin-top:14px">Daily fuel</div>
+        <div class="macros"><div><b>${MACROS.kcal.toLocaleString()}</b><span>kcal</span></div><div><b>${MACROS.protein}g</b><span>protein</span></div><div><b>${MACROS.carbs}g</b><span>carbs</span></div><div><b>${MACROS.fat}g</b><span>fat</span></div></div>
+        ${plan.type !== 'rest' ? '<div class="hint">Put most of your carbs in the meals before and after training.</div>' : ''}
+      </div>
+    </div>
+    ${tips.length ? `<ul style="margin-top:14px">${tips.slice(0, 4).map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul>` : ''}
+    <div class="note">Zones are provisional estimates; confirm against your Garmin zones. General guidance from your trends, not medical advice.</div>`;
+
+  $('coach').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
+    checked[cb.dataset.i] = cb.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) {}
+  });
 }
 
 /* ---------- charts ---------- */
@@ -372,7 +452,7 @@ function demoData() {
     daily.push({ date, source: 'apple', steps: Math.round(4000 + rnd() * 8000) });
     if (rnd() > 0.45) {
       const st = new Date(d); st.setHours(18, 30);
-      workouts.push({ source: 'garmin', external_id: 'g' + i, start_time: st.toISOString(), date, sport: rnd() > 0.5 ? 'Tennis' : 'Strength Training', duration_min: 45 + rnd() * 60, avg_hr: Math.round(120 + rnd() * 30), kcal: Math.round(300 + rnd() * 400) });
+      workouts.push({ source: 'garmin', external_id: 'g' + i, start_time: st.toISOString(), date, sport: rnd() > 0.5 ? 'Hiit' : 'Strength Training', duration_min: 45 + rnd() * 60, avg_hr: Math.round(120 + rnd() * 30), kcal: Math.round(300 + rnd() * 400) });
       workouts.push({ source: 'whoop', external_id: 'w' + i, start_time: st.toISOString(), date, sport: 'tennis', strain: +(8 + rnd() * 7).toFixed(1) });
     }
   }
