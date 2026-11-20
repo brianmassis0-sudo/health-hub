@@ -61,6 +61,15 @@
   .row { display: flex; gap: 8px; margin-top: 16px; }
   .err { color: var(--bad); font-size: 13px; margin-top: 10px; }
   .demo-banner { background: var(--surface-1); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+  .coach { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  .coach-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .coach-head h2 { font-size: 16px; margin: 0; }
+  .badge { font-size: 12px; font-weight: 650; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; }
+  .coach-sum { margin: 6px 0 10px; color: var(--text-primary); font-size: 14px; }
+  .coach ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .coach li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; font-size: 13.5px; color: var(--text-secondary); }
+  .coach li b { color: var(--text-primary); font-weight: 600; }
+  .coach .note { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -101,6 +110,7 @@
     </header>
     <div class="demo-banner hidden" id="demo-banner">Showing demo data. Tap ⚙︎ to connect your real database.</div>
 
+    <div class="coach" id="coach"></div>
     <div class="tiles" id="tiles"></div>
 
     <div class="grid">
@@ -200,6 +210,56 @@ function renderTiles(days) {
     tile('Body Battery', 'body_battery', v => fmtN(v));
 }
 
+/* ---------- coaching ---------- */
+function renderCoach(all, workouts) {
+  const days = all, n = days.length;
+  if (!n) { $('coach').innerHTML = '<div class="coach-sum">No data yet. Advice appears after your first sync.</div>'; return; }
+  const today = days[n - 1];
+  const lastWith = k => { for (let i = n - 1; i >= 0; i--) if (days[i][k] != null) return days[i][k]; return null; };
+  const win = (k, from, to) => avg(days.slice(Math.max(0, n - from), n - to).map(d => d[k]));
+  const rec = lastWith('recovery'), hrv = lastWith('hrv'), rhr = lastWith('rhr');
+  const hrvBase = win('hrv', 31, 1), rhrBase = win('rhr', 31, 1);
+  const sleep7 = win('sleep_min', 7, 0), sleepLast = lastWith('sleep_min');
+  const strain7 = win('strain', 7, 0), strain30 = win('strain', 30, 0);
+  const steps7 = win('steps', 7, 0);
+  const hrvLow3 = hrvBase != null && days.slice(-3).filter(d => d.hrv != null && d.hrv < hrvBase * 0.9).length >= 3;
+
+  const wk = new Date(); wk.setDate(wk.getDate() - 7); const wkCut = localISO(wk);
+  const recent = mergeWorkouts((workouts || []).filter(w => (w.date || '') > wkCut));
+  const isLift = w => /strength|weight|lift|gym|functional|hiit|crossfit/i.test(w.sport || '');
+  const isRacquet = w => /tennis|padel|pickle|squash|racquet|badminton/i.test(w.sport || '');
+  const lifts = recent.filter(isLift).length, courts = recent.filter(isRacquet).length;
+
+  // Headline from recovery (fallback: HRV vs baseline)
+  let level, head, sum;
+  const score = rec != null ? rec : (hrv != null && hrvBase ? (hrv >= hrvBase ? 70 : hrv >= hrvBase * 0.9 ? 50 : 25) : null);
+  if (score == null) { level = 'warn'; head = 'Not enough data'; sum = 'Sync a few more days for personal advice.'; }
+  else if (score >= 67) { level = 'good'; head = '▲ Push day'; sum = 'Your body is ready for hard work. Good day for a heavy lift or a competitive tennis/padel match.'; }
+  else if (score >= 34) { level = 'warn'; head = '● Moderate day'; sum = 'Train, but keep it controlled: a normal lift without grinding to failure, or a drills-focused hit instead of a long match.'; }
+  else { level = 'bad'; head = '▼ Recovery day'; sum = 'Your body is still recovering. Swap intense training for a 30–45 min walk, mobility, or a light rally, and protect tonight\'s sleep.'; }
+
+  const tips = [];
+  if (hrvLow3) tips.push(['📉', `<b>HRV has been below your normal for 3+ days</b> (${fmtN(hrvBase)} ms avg). Common causes: hard training stacked up, short sleep, alcohol, or getting sick. Ease off for a day or two.`]);
+  else if (hrv != null && hrvBase != null && hrv > hrvBase * 1.1) tips.push(['📈', `<b>HRV is above your normal</b> (${fmtN(hrv)} vs ${fmtN(hrvBase)} ms), a sign you've recovered well.`]);
+  if (rhr != null && rhrBase != null && rhr >= rhrBase + 3) tips.push(['❤️', `<b>Resting HR is up ${fmtN(rhr - rhrBase)} bpm</b> from your usual. That often follows drinking, a late meal, dehydration or an oncoming cold. Hydrate and go easier today.`]);
+  if (sleep7 != null && sleep7 < 420) tips.push(['😴', `<b>You're averaging ${fmtH(sleep7)} of sleep this week.</b> For fat loss and recovery aim for 7.5h+. Short sleep raises hunger and makes holding muscle in a deficit harder.`]);
+  else if (sleepLast != null && sleepLast < 390) tips.push(['😴', `<b>Short night (${fmtH(sleepLast)}).</b> Try to get to bed 30–45 min earlier tonight.`]);
+  if (strain7 != null && strain30 != null && strain7 > strain30 * 1.2 && (score ?? 100) < 67) tips.push(['⚠️', `<b>Training load is climbing faster than you're recovering</b> (7-day strain ${fmtN(strain7, 1)} vs ${fmtN(strain30, 1)} usual). Plan a lighter day soon.`]);
+  if (lifts < 4) {
+    const left = 4 - lifts;
+    tips.push(['🏋️', `<b>Lifting: ${lifts}/4 sessions in the last 7 days.</b> ${score != null && score >= 34 ? `Today is a good day for one${left > 1 ? ` (${left} to go)` : ''}.` : 'Get the next one in when recovery is back up.'}`]);
+  } else tips.push(['🏋️', `<b>Lifting: ${lifts}/4 this week.</b> Target hit, nice work.`]);
+  if (courts >= 3 && lifts >= 3 && (score ?? 100) < 50) tips.push(['🎾', `<b>${courts} court sessions plus ${lifts} lifts this week.</b> On low days, put lower-body lifts away from match days.`]);
+  if (steps7 != null && steps7 < 8000) tips.push(['🚶', `<b>Steps are averaging ${fmtN(steps7)}/day.</b> A daily 20–30 min walk is an easy fat-loss win that doesn't hurt recovery.`]);
+
+  const color = level === 'good' ? css('--good') : level === 'bad' ? css('--bad') : css('--warn');
+  $('coach').innerHTML = `<div class="coach-head"><h2>Today's plan</h2><span class="badge" style="color:${color}">${head}</span>
+    <span class="sub">${rec != null ? `Recovery ${fmtN(rec)}%` : ''}${hrv != null ? ` · HRV ${fmtN(hrv)} ms` : ''}${sleepLast != null ? ` · Sleep ${fmtH(sleepLast)}` : ''}</span></div>
+    <div class="coach-sum">${sum}</div>
+    <ul>${tips.slice(0, 5).map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul>
+    <div class="note">General guidance from your trends, not medical advice.</div>`;
+}
+
 /* ---------- charts ---------- */
 function baseOpts(yTitle, extra = {}) {
   const muted = css('--text-muted'), grid = css('--grid'), sec = css('--text-secondary');
@@ -268,6 +328,7 @@ function render() {
   const cut = localISO(cutoff);
   const days = all.filter(d => d.date > cut);
   renderTiles(all);
+  renderCoach(all, RAW.workouts);
   const L = days.map(d => dLabel(d.date)), col = k => days.map(d => d[k] ?? null);
 
   CHARTS.rec = lineChart('c-recovery', L, col('recovery'), css('--series-1'), '%', { min: 0, max: 100 });
