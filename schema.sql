@@ -111,3 +111,41 @@ grant execute on function get_dashboard(text, int)  to anon;
 -- ⚠️ CHANGE THIS to your own long random string (e.g. from a password generator)
 insert into app_secrets (key, value) values ('app_secret', 'CHANGE-ME-to-a-long-random-string')
 on conflict (key) do update set value = excluded.value;
+
+-- Newer Supabase projects don't auto-grant table access to the sync key
+grant usage on schema public to service_role;
+grant all on table daily_metrics, workouts, app_secrets to service_role;
+
+-- Checklist + non-negotiables, synced across devices
+create table if not exists daily_checks (
+  date       date primary key,
+  checks     jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+alter table daily_checks enable row level security;
+grant all on table daily_checks to service_role;
+
+create or replace function save_checks(secret text, day date, checks jsonb) returns text
+language plpgsql security definer set search_path = public as $body$
+begin
+  perform _check_secret(secret);
+  insert into daily_checks (date, checks, updated_at) values (day, coalesce(checks, '{}'::jsonb), now())
+  on conflict (date) do update set checks = excluded.checks, updated_at = now();
+  return 'ok';
+end $body$;
+grant execute on function save_checks(text, date, jsonb) to anon;
+
+create or replace function get_dashboard(secret text, days int default 60) returns jsonb
+language plpgsql security definer set search_path = public as $body$
+begin
+  perform _check_secret(secret);
+  return jsonb_build_object(
+    'daily', coalesce((select jsonb_agg(to_jsonb(m) order by m.date, m.source)
+                       from daily_metrics m where m.date >= current_date - days), '[]'::jsonb),
+    'workouts', coalesce((select jsonb_agg(to_jsonb(w) order by w.start_time desc)
+                          from workouts w where w.date >= current_date - days), '[]'::jsonb),
+    'checks', coalesce((select jsonb_object_agg(c.date::text, c.checks)
+                        from daily_checks c where c.date >= current_date - days), '{}'::jsonb)
+  );
+end $body$;
+grant execute on function get_dashboard(text, int) to anon;

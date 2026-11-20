@@ -105,11 +105,26 @@
   .sc-num small { font-size: 14px; font-weight: 500; color: var(--text-muted); }
   .sc-lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
   .sc-word { font-weight: 600; font-size: 14px; } .sc-avg { font-size: 12px; color: var(--text-secondary); }
-  .sc-segs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .sc-segs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
   @media (max-width: 760px) { .sc-segs { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
   .sc-seg { font-size: 12.5px; } .sc-seg span { color: var(--text-secondary); } .sc-seg b { float: right; font-variant-numeric: tabular-nums; }
   .sc-seg .mbar { margin: 6px 0 3px; } .sc-seg em { font-style: normal; font-size: 11.5px; color: var(--text-muted); }
   .wk-m b { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .nn { border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin: 0 0 14px; }
+  .nn-lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 8px; }
+  .nn-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 760px) { .nn-grid { grid-template-columns: minmax(0, 1fr); } }
+  .nn-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--page); }
+  .nn-card.hit { border-color: var(--good); }
+  .nn-top { display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; font-weight: 600; }
+  .nn-top b { font-variant-numeric: tabular-nums; } .nn-card.hit .nn-top b { color: var(--good); }
+  .nn-card .mbar { margin: 8px 0 6px; height: 6px; }
+  .nn-sub { font-size: 12px; color: var(--text-secondary); } .nn-sub span { color: var(--text-muted); }
+  .nn-manual { cursor: pointer; } .nn-manual input { accent-color: var(--series-1); vertical-align: -2px; }
+  .nn-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .nn-btns button { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+  .nn-btns button:active { transform: scale(.97); }
+  .nn-sync { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; min-height: 14px; }
   .mob-sub { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 2px; }
   .hidden { display: none !important; }
 </style>
@@ -313,8 +328,37 @@ const isRun = w => /run/i.test(w.sport || '');
 
 const MOB_FOR = { 1: ['upperPre', 'upperPost'], 2: ['hyroxPre', 'hyroxPost'], 3: ['lowerPre', 'lowerPost'], 4: ['hyroxPre', 'hyroxPost'], 5: ['upperPre', 'upperPost'], 6: ['hyroxPre', 'hyroxPost'], 0: [null, 'rest'] };
 
-/* daily compliance score: training 40 · meals 40 · mobility 20 (rest day: meals 60 · mobility 40) */
-function loadChecked(ds) { try { return JSON.parse(localStorage.getItem('hh_done_' + ds) || '{}'); } catch (e) { return {}; } }
+/* ---------- checklist storage: saved on this device AND synced to Supabase ---------- */
+let CHECKS = {}, STEPS = {}, SYNC = 'local', saveTimers = {};
+function loadChecked(ds) {
+  if (CHECKS[ds]) return { ...CHECKS[ds] };
+  try { return JSON.parse(localStorage.getItem('hh_done_' + ds) || '{}'); } catch (e) { return {}; }
+}
+function saveChecked(ds, obj) {
+  CHECKS[ds] = { ...obj };
+  try { localStorage.setItem('hh_done_' + ds, JSON.stringify(obj)); } catch (e) {}
+  if (DEMO || SYNC === 'off') return;
+  clearTimeout(saveTimers[ds]);
+  setSync('saving');
+  saveTimers[ds] = setTimeout(async () => {
+    saveTimers[ds] = null;
+    try {
+      const r = await rpc('save_checks', { secret: LS('hh_secret'), day: ds, checks: obj });
+      setSync(r.ok ? 'synced' : 'error');
+    } catch (e) { setSync('error'); }
+  }, 600);
+}
+function setSync(st) {
+  SYNC = st === 'error' ? 'error' : SYNC === 'off' ? 'off' : 'on';
+  const el = $('sync-state'); if (!el) return;
+  el.textContent = { saving: 'Saving…', synced: '✓ Synced to all devices', error: '⚠ Couldn\'t sync, saved on this device', off: 'Saved on this device only' }[st] || '';
+}
+
+/* ---------- daily score ----------
+   Training day: training 30 · meals 30 · mobility 10 · steps 15 · water 15
+   Rest day:     meals 40 · mobility 20 · steps 20 · water 20                 */
+const NN = { steps: 10000, waterMl: 3000 };
+function stepsDone(ds, checked) { const v = STEPS[ds] || 0; return checked.steps10k || v >= NN.steps ? NN.steps : v; }
 function dayScore(ds, checked) {
   checked = checked || loadChecked(ds);
   const dow = new Date(ds + 'T12:00:00').getDay(), plan = PLAN[dow], [pre, post] = MOB_FOR[dow];
@@ -323,12 +367,36 @@ function dayScore(ds, checked) {
   const count = (prefix, n) => { let c = 0; for (let i = 0; i < n; i++) if (checked[prefix + i]) c++; return c; };
   const train = count('', nTrain), meals = count('meal', MEALS.length);
   const mob = (pre ? count('pre', MOB[pre].length) : 0) + count('post', MOB[post].length);
-  const w = plan.type === 'rest' ? { t: 0, m: 60, b: 40 } : { t: 40, m: 40, b: 20 };
-  const score = Math.round((nTrain ? train / nTrain * w.t : 0) + meals / MEALS.length * w.m + mob / nMob * w.b);
-  const any = Object.values(checked).some(Boolean);
-  return { score, any, train, nTrain, meals, nMeals: MEALS.length, mob, nMob, w };
+  const steps = stepsDone(ds, checked), water = Math.min(checked.water || 0, NN.waterMl);
+  const w = plan.type === 'rest' ? { t: 0, m: 40, b: 20, s: 20, h: 20 } : { t: 30, m: 30, b: 10, s: 15, h: 15 };
+  const score = Math.round((nTrain ? train / nTrain * w.t : 0) + meals / MEALS.length * w.m + mob / nMob * w.b
+    + steps / NN.steps * w.s + water / NN.waterMl * w.h);
+  const any = Object.entries(checked).some(([k, v]) => k === 'water' ? v > 0 : Boolean(v));
+  return { score, any, train, nTrain, meals, nMeals: MEALS.length, mob, nMob, steps, water, w };
 }
 function scoreWord(v) { return v >= 90 ? 'Locked in 🔥' : v >= 75 ? 'Strong day 💪' : v >= 50 ? 'Halfway there' : v > 0 ? 'Getting started' : 'Nothing ticked yet'; }
+
+function nonNegHTML(ds, checked, sc) {
+  const raw = STEPS[ds], auto = raw != null && raw >= NN.steps, hit = auto || checked.steps10k;
+  const stepsTxt = raw != null ? `${fmtN(raw)} / 10,000` : 'No step data yet';
+  const L = (checked.water || 0) / 1000, wHit = (checked.water || 0) >= NN.waterMl;
+  return `<div class="nn">
+    <div class="nn-lbl">⭐ Non-negotiables</div>
+    <div class="nn-grid">
+      <div class="nn-card${hit ? ' hit' : ''}">
+        <div class="nn-top"><span>👣 10,000 steps</span><b>${hit ? '✓ Done' : stepsTxt}</b></div>
+        <div class="mbar"><span style="width:${Math.min(100, sc.steps / NN.steps * 100)}%"></span></div>
+        <div class="nn-sub">${auto ? 'Counted from your Garmin / iPhone data' : `<label class="nn-manual"><input type="checkbox" data-i="steps10k" ${checked.steps10k ? 'checked' : ''}> I hit 10k today</label> <span>· data syncs a few times a day</span>`}</div>
+      </div>
+      <div class="nn-card${wHit ? ' hit' : ''}">
+        <div class="nn-top"><span>💧 3 L water</span><b>${wHit ? '✓ Done' : `${+L.toFixed(2)} / 3 L`}</b></div>
+        <div class="mbar"><span style="width:${Math.min(100, (checked.water || 0) / NN.waterMl * 100)}%"></span></div>
+        <div class="nn-btns"><button data-w="250">+250 ml</button><button data-w="500">+500 ml</button><button data-w="750">+750 ml</button><button data-w="-250" title="Undo 250 ml">−</button></div>
+      </div>
+    </div>
+    <div class="nn-sync" id="sync-state"></div>
+  </div>`;
+}
 
 function mobilityHTML(dow, checked, level) {
   const [pre, post] = MOB_FOR[dow];
@@ -399,9 +467,8 @@ function renderCoach(all, workouts) {
   const badge = { good: '▲ Green: push', warn: '● Yellow: controlled', bad: '▼ Red: recover' }[level];
   const color = level === 'good' ? css('--good') : level === 'bad' ? css('--bad') : css('--warn');
 
-  // checklist state (per day, this device only)
-  const key = 'hh_done_' + viewDate;
-  let checked = {}; try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) {}
+  // checklist state (synced via Supabase, cached on this device)
+  const checked = loadChecked(viewDate);
   const items = [...plan.items, ...(plan.run ? ['🏃 Run: ' + plan.run] : [])];
   const list = items.map((t, i) => `<label class="chk"><input type="checkbox" data-i="${i}" ${checked[i] ? 'checked' : ''}><span>${t}</span></label>`).join('');
 
@@ -419,7 +486,9 @@ function renderCoach(all, workouts) {
     <div class="coach-sum">${!isTodayView ? `Planned session for ${dayName}. On the day, this card will adjust it to your recovery.` : score == null ? 'Sync a few days of data for recovery-based adjustments. Follow the plan as written for now.' : adjustFor(plan, level)}</div>
     ${(() => { const sc = dayScore(viewDate, checked); const seg = (lbl, a, n, pts) => pts ? `<div class="sc-seg"><span>${lbl}</span><b>${a}/${n}</b><div class="mbar"><span style="width:${n ? a / n * 100 : 0}%"></span></div><em>${Math.round(n ? a / n * pts : 0)}/${pts} pts</em></div>` : '';
       return `<div class="scorebox"><div class="sc-main"><div class="sc-num">${sc.score}<small>/100</small></div><div><div class="sc-lbl">${isTodayView ? "Today's" : dayName + "'s"} score</div><div class="sc-word">${scoreWord(sc.score)}</div>${wk.avgScore != null ? `<div class="sc-avg">Week avg ${wk.avgScore}</div>` : ''}</div></div>
-        <div class="sc-segs">${seg('🏋️ Training', sc.train, sc.nTrain, sc.w.t)}${seg('🍽️ Meals', sc.meals, sc.nMeals, sc.w.m)}${seg('🧘 Mobility', sc.mob, sc.nMob, sc.w.b)}</div></div>`; })()}
+        <div class="sc-segs">${seg('🏋️ Training', sc.train, sc.nTrain, sc.w.t)}${seg('🍽️ Meals', sc.meals, sc.nMeals, sc.w.m)}${seg('🧘 Mobility', sc.mob, sc.nMob, sc.w.b)}${(() => { const pts = sc.w.s + sc.w.h, got = sc.steps / NN.steps * sc.w.s + sc.water / NN.waterMl * sc.w.h, hit = (sc.steps >= NN.steps) + (sc.water >= NN.waterMl);
+          return `<div class="sc-seg"><span>⭐ Non-neg</span><b>${hit}/2</b><div class="mbar"><span style="width:${got / pts * 100}%"></span></div><em>${Math.round(got)}/${pts} pts</em></div>`; })()}</div></div>
+      ${nonNegHTML(viewDate, checked, sc)}`; })()}
     <div class="coach-grid">
       <div><div class="coach-lbl">Session checklist</div>${list}
         ${plan.run ? `<div class="hint">🏃 ${isTodayView ? runAdjust(level) : runAdjust('warn')}</div>` : ''}${plan.hr ? `<div class="hint">❤️ ${plan.hr}</div>` : ''}
@@ -438,9 +507,12 @@ function renderCoach(all, workouts) {
   });
   const back = $('back-today'); if (back) back.onclick = () => { VIEW = null; renderCoach(all, workouts); };
   $('coach').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
-    checked[cb.dataset.i] = cb.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) {}
-    renderCoach(all, workouts);
+    checked[cb.dataset.i] = cb.checked; saveChecked(viewDate, checked); renderCoach(all, workouts);
   });
+  $('coach').querySelectorAll('.nn-btns button').forEach(b => b.onclick = () => {
+    checked.water = Math.max(0, (checked.water || 0) + +b.dataset.w); saveChecked(viewDate, checked); renderCoach(all, workouts);
+  });
+  setSync(DEMO ? 'off' : SYNC === 'error' ? 'error' : SYNC === 'off' ? 'off' : 'synced');
 }
 
 /* ---------- charts ---------- */
@@ -507,6 +579,9 @@ function sleepChart(labels, days) {
 function render() {
   Object.values(CHARTS).forEach(c => c.destroy()); CHARTS = {};
   const all = mergeDaily(RAW.daily || []);
+  STEPS = {}; all.forEach(d => { if (d.steps != null) STEPS[d.date] = d.steps; });
+  if (RAW.checks) { SYNC = 'on'; Object.entries(RAW.checks).forEach(([d, c]) => { if (!CHECKS[d]) CHECKS[d] = c || {}; }); }
+  else if (!DEMO) SYNC = 'off';
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - DAYS);
   const cut = localISO(cutoff);
   const days = all.filter(d => d.date > cut);
@@ -532,12 +607,15 @@ function render() {
 }
 
 /* ---------- data ---------- */
-async function load() {
-  const url = LS('hh_url'), key = LS('hh_key'), secret = LS('hh_secret');
-  const r = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/get_dashboard`, {
+function rpc(fn, body) {
+  const url = LS('hh_url'), key = LS('hh_key');
+  return fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/${fn}`, {
     method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json', ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify({ secret, days: 90 }),
+    body: JSON.stringify(body),
   });
+}
+async function load() {
+  const r = await rpc('get_dashboard', { secret: LS('hh_secret'), days: 90 });
   if (!r.ok) throw new Error((await r.text()).slice(0, 200));
   return r.json();
 }
@@ -581,6 +659,10 @@ $('demo').onclick = () => { RAW = demoData(); DEMO = true; showDash(); };
 $('settings').onclick = () => showSetup();
 $('range').onclick = e => { const b = e.target.closest('button'); if (!b) return;
   DAYS = +b.dataset.d; [...$('range').children].forEach(x => x.classList.toggle('on', x === b)); render(); };
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || DEMO || !RAW || Object.values(saveTimers).some(Boolean)) return;
+  try { const fresh = await load(); CHECKS = {}; RAW = fresh; render(); } catch (e) {}
+});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => RAW && render());
 if (location.hash === '#demo') { RAW = demoData(); DEMO = true; showDash(); } else start();
 </script>
