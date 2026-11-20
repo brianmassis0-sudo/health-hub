@@ -88,6 +88,7 @@
   .macros { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .macros div { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; }
   .macros b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; } .macros span { font-size: 11px; color: var(--text-muted); }
+  .mob-sub { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 2px; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -249,9 +250,30 @@ const PLAN = {
   0: { title: 'Rest', icon: '😴', type: 'rest', time: 'Recovery',
        items: ['Optional walk / mobility', 'Prep for next week'] },
 };
+const MOB = {
+  upperPre: ['Band pull-aparts 2×15', 'Open-book T-spine rotations 8/side', 'Scap push-ups ×10', 'Arm circles + cross-body swings 30s', 'Light warm-up sets of the first lift'],
+  lowerPre: ['90/90 hip switches 8/side', "World's greatest stretch 5/side", 'Ankle rocks 10/side', 'Glute bridges ×12', 'Paused bodyweight squats ×10'],
+  hyroxPre: ['Leg swings 10/side (front + side)', 'Walking lunge + twist 6/side', 'Inchworms ×5', 'Ankle rocks 10/side', 'Easy jog or row 3 min'],
+  upperPost: ['Doorway pec stretch 45s/side', 'Child\'s pose lat stretch 60s', 'Couch stretch (hip flexor) 60s/side', 'Calf stretch on wall 45s/side'],
+  lowerPost: ['Couch stretch 60s/side', 'Pigeon / 90-90 hold 60s/side', 'Hamstring stretch 45s/side', 'Adductor rock-backs 10/side'],
+  hyroxPost: ['Couch stretch 60s/side', 'Pigeon / 90-90 hold 60s/side', 'Calf stretch on wall 45s/side', 'Child\'s pose lat stretch 60s', 'Legs up the wall 2 min'],
+  rest: ['Foam roll quads, calves, upper back · 5 min', 'Couch stretch 60s/side', 'Pigeon / 90-90 hold 60s/side', 'Thoracic rotations 10/side', 'Deep squat hold 2 min total', 'Dead hang 3×30s', 'Hamstring + calf stretch 45s/side'],
+};
 const isLift = w => /strength|weight|lift|gym/i.test(w.sport || '');
 const isHyrox = w => /hyrox|hiit|functional|crossfit|cardio|bootcamp|circuit|ski|row|sled/i.test(w.sport || '');
 const isRun = w => /run/i.test(w.sport || '');
+
+const MOB_FOR = { 1: ['upperPre', 'upperPost'], 2: ['hyroxPre', 'hyroxPost'], 3: ['lowerPre', 'lowerPost'], 4: ['hyroxPre', 'hyroxPost'], 5: ['upperPre', 'upperPost'], 6: ['hyroxPre', 'hyroxPost'], 0: [null, 'rest'] };
+
+function mobilityHTML(dow, checked, level) {
+  const [pre, post] = MOB_FOR[dow];
+  const box = (prefix, arr) => arr.map((t, i) => `<label class="chk"><input type="checkbox" data-i="${prefix}${i}" ${checked[prefix + i] ? 'checked' : ''}><span>${t}</span></label>`).join('');
+  let h = '';
+  if (pre) h += `<div class="mob-sub">Before training · 5–7 min, moving stretches</div>${box('pre', MOB[pre])}`;
+  h += `<div class="mob-sub">${pre ? 'Evening · 10 min, hold each stretch' : 'Sunday reset · ~20 min'}</div>${box('post', MOB[post])}`;
+  if (level === 'bad') h += `<div class="hint">🧘 Low recovery day: do the evening routine even if you skip training. Easy movement helps.</div>`;
+  return h;
+}
 
 function adjustFor(plan, level) {
   if (plan.type === 'rest') return level === 'bad' ? 'Full rest. Sleep in and keep the walk easy.' : 'Rest day. An easy walk or mobility is fine; no extra training.';
@@ -336,6 +358,7 @@ function renderCoach(all, workouts) {
         <div class="coach-lbl" style="margin-top:14px">Daily fuel</div>
         <div class="macros"><div><b>${MACROS.kcal.toLocaleString()}</b><span>kcal</span></div><div><b>${MACROS.protein}g</b><span>protein</span></div><div><b>${MACROS.carbs}g</b><span>carbs</span></div><div><b>${MACROS.fat}g</b><span>fat</span></div></div>
         ${plan.type !== 'rest' ? '<div class="hint">Put most of your carbs in the meals before and after training.</div>' : ''}
+        <div class="coach-lbl" style="margin-top:16px">🧘 Mobility</div>${mobilityHTML(vd.getDay(), checked, isTodayView ? level : 'warn')}
       </div>
     </div>
     ${tips.length && isTodayView ? `<ul style="margin-top:14px">${tips.slice(0, 4).map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul>` : ''}
