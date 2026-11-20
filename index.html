@@ -98,6 +98,18 @@
   .meal-m { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
   .meal-i { font-size: 12.5px; color: var(--text-secondary); margin: 2px 0 0 24px; }
   .meal.done .meal-n, .meal.done .meal-i { color: var(--text-muted); text-decoration: line-through; }
+  .scorebox { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin: 4px 0 14px; background: var(--page); }
+  @media (max-width: 760px) { .scorebox { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+  .sc-main { display: flex; gap: 12px; align-items: center; }
+  .sc-num { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .sc-num small { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+  .sc-lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+  .sc-word { font-weight: 600; font-size: 14px; } .sc-avg { font-size: 12px; color: var(--text-secondary); }
+  .sc-segs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 760px) { .sc-segs { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+  .sc-seg { font-size: 12.5px; } .sc-seg span { color: var(--text-secondary); } .sc-seg b { float: right; font-variant-numeric: tabular-nums; }
+  .sc-seg .mbar { margin: 6px 0 3px; } .sc-seg em { font-style: normal; font-size: 11.5px; color: var(--text-muted); }
+  .wk-m b { font-size: 12px; font-variant-numeric: tabular-nums; }
   .mob-sub { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 2px; }
   .hidden { display: none !important; }
 </style>
@@ -301,6 +313,23 @@ const isRun = w => /run/i.test(w.sport || '');
 
 const MOB_FOR = { 1: ['upperPre', 'upperPost'], 2: ['hyroxPre', 'hyroxPost'], 3: ['lowerPre', 'lowerPost'], 4: ['hyroxPre', 'hyroxPost'], 5: ['upperPre', 'upperPost'], 6: ['hyroxPre', 'hyroxPost'], 0: [null, 'rest'] };
 
+/* daily compliance score: training 40 · meals 40 · mobility 20 (rest day: meals 60 · mobility 40) */
+function loadChecked(ds) { try { return JSON.parse(localStorage.getItem('hh_done_' + ds) || '{}'); } catch (e) { return {}; } }
+function dayScore(ds, checked) {
+  checked = checked || loadChecked(ds);
+  const dow = new Date(ds + 'T12:00:00').getDay(), plan = PLAN[dow], [pre, post] = MOB_FOR[dow];
+  const nTrain = plan.type === 'rest' ? 0 : plan.items.length + (plan.run ? 1 : 0);
+  const nMob = (pre ? MOB[pre].length : 0) + MOB[post].length;
+  const count = (prefix, n) => { let c = 0; for (let i = 0; i < n; i++) if (checked[prefix + i]) c++; return c; };
+  const train = count('', nTrain), meals = count('meal', MEALS.length);
+  const mob = (pre ? count('pre', MOB[pre].length) : 0) + count('post', MOB[post].length);
+  const w = plan.type === 'rest' ? { t: 0, m: 60, b: 40 } : { t: 40, m: 40, b: 20 };
+  const score = Math.round((nTrain ? train / nTrain * w.t : 0) + meals / MEALS.length * w.m + mob / nMob * w.b);
+  const any = Object.values(checked).some(Boolean);
+  return { score, any, train, nTrain, meals, nMeals: MEALS.length, mob, nMob, w };
+}
+function scoreWord(v) { return v >= 90 ? 'Locked in 🔥' : v >= 75 ? 'Strong day 💪' : v >= 50 ? 'Halfway there' : v > 0 ? 'Getting started' : 'Nothing ticked yet'; }
+
 function mobilityHTML(dow, checked, level) {
   const [pre, post] = MOB_FOR[dow];
   const box = (prefix, arr) => arr.map((t, i) => `<label class="chk"><input type="checkbox" data-i="${prefix}${i}" ${checked[prefix + i] ? 'checked' : ''}><span>${t}</span></label>`).join('');
@@ -334,7 +363,7 @@ function runAdjust(level) {
 function weekStrip(workouts, sel) {
   const now = new Date(), dow = now.getDay(), mon = new Date(now); mon.setDate(now.getDate() - ((dow + 6) % 7));
   const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  let done = 0, due = 0;
+  let done = 0, due = 0; const scored = [];
   const cells = names.map((nm, i) => {
     const d = new Date(mon); d.setDate(mon.getDate() + i); const ds = localISO(d), wd = d.getDay(), p = PLAN[wd];
     const ws = mergeWorkouts((workouts || []).filter(w => w.date === ds));
@@ -343,10 +372,12 @@ function weekStrip(workouts, sel) {
     else if (p.type === 'hyrox') ok = ws.some(isHyrox) || ws.some(w => !isLift(w));
     const isToday = ds === localISO(now), future = d > now && !isToday;
     if (p.type !== 'rest' && !future) { due++; if (ok) done++; }
-    const mark = p.type === 'rest' ? '😴' : ok ? '✅' : future || isToday ? '·' : '—';
+    const sc = dayScore(ds);
+    const mark = sc.any ? `<b>${sc.score}</b>` : p.type === 'rest' ? '😴' : ok ? '✅' : future || isToday ? '·' : '—';
+    if (sc.any && !future) { scored.push(sc.score); }
     return `<div class="wk${isToday ? ' today' : ''}${ds === sel ? ' sel' : ''}" data-date="${ds}" role="button" tabindex="0" title="${p.title}"><div class="wk-d">${nm}</div><div class="wk-i">${p.icon}</div><div class="wk-m">${mark}</div></div>`;
   }).join('');
-  return { html: `<div class="week">${cells}</div>`, done, due };
+  return { html: `<div class="week">${cells}</div>`, done, due, avgScore: scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : null };
 }
 
 function renderCoach(all, workouts) {
@@ -386,6 +417,9 @@ function renderCoach(all, workouts) {
     <div class="coach-head"><h2>${plan.icon} ${isTodayView ? 'Today' : dayName}: ${plan.title}</h2>${isTodayView ? `<span class="badge" style="color:${color}">${badge}</span>` : `<button class="btn" id="back-today" style="padding:3px 10px;font-size:12px">← Back to today</button>`}</div>
     <div class="sub" style="margin-top:2px">${plan.time}${!isTodayView ? '' : rec != null ? ` · Recovery ${fmtN(rec)}%` : ''}${isTodayView && hrv != null ? ` · HRV ${fmtN(hrv)} ms` : ''}${isTodayView && sleepLast != null ? ` · Slept ${fmtH(sleepLast)}` : ''}</div>
     <div class="coach-sum">${!isTodayView ? `Planned session for ${dayName}. On the day, this card will adjust it to your recovery.` : score == null ? 'Sync a few days of data for recovery-based adjustments. Follow the plan as written for now.' : adjustFor(plan, level)}</div>
+    ${(() => { const sc = dayScore(viewDate, checked); const seg = (lbl, a, n, pts) => pts ? `<div class="sc-seg"><span>${lbl}</span><b>${a}/${n}</b><div class="mbar"><span style="width:${n ? a / n * 100 : 0}%"></span></div><em>${Math.round(n ? a / n * pts : 0)}/${pts} pts</em></div>` : '';
+      return `<div class="scorebox"><div class="sc-main"><div class="sc-num">${sc.score}<small>/100</small></div><div><div class="sc-lbl">${isTodayView ? "Today's" : dayName + "'s"} score</div><div class="sc-word">${scoreWord(sc.score)}</div>${wk.avgScore != null ? `<div class="sc-avg">Week avg ${wk.avgScore}</div>` : ''}</div></div>
+        <div class="sc-segs">${seg('🏋️ Training', sc.train, sc.nTrain, sc.w.t)}${seg('🍽️ Meals', sc.meals, sc.nMeals, sc.w.m)}${seg('🧘 Mobility', sc.mob, sc.nMob, sc.w.b)}</div></div>`; })()}
     <div class="coach-grid">
       <div><div class="coach-lbl">Session checklist</div>${list}
         ${plan.run ? `<div class="hint">🏃 ${isTodayView ? runAdjust(level) : runAdjust('warn')}</div>` : ''}${plan.hr ? `<div class="hint">❤️ ${plan.hr}</div>` : ''}
@@ -405,7 +439,7 @@ function renderCoach(all, workouts) {
   const back = $('back-today'); if (back) back.onclick = () => { VIEW = null; renderCoach(all, workouts); };
   $('coach').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
     checked[cb.dataset.i] = cb.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) {}
-    if (cb.dataset.i.startsWith('meal')) renderCoach(all, workouts);
+    renderCoach(all, workouts);
   });
 }
 
