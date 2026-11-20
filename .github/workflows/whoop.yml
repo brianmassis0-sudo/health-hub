@@ -1,0 +1,46 @@
+name: WHOOP connect
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: "Paste the whole localhost link from your browser"
+        required: true
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Exchange code for token
+        env:
+          CODE: ${{ github.event.inputs.code }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
+        run: |
+          python - <<'EOF'
+          import os, sys, requests
+          sys.path.insert(0, ".")
+          from sync import sb_set_secret, WHOOP_TOKEN_URL
+          code = os.environ["CODE"].strip()
+          if "code=" in code:
+              code = code.split("code=")[1].split("&")[0]
+          r = requests.post(WHOOP_TOKEN_URL, data={
+              "grant_type": "authorization_code", "code": code,
+              "redirect_uri": "http://localhost:8765/callback",
+              "client_id": os.environ["WHOOP_CLIENT_ID"],
+              "client_secret": os.environ["WHOOP_CLIENT_SECRET"]}, timeout=30)
+          if r.status_code >= 300:
+              sys.exit(f"WHOOP said {r.status_code}: {r.text}")
+          tok = r.json()
+          if not tok.get("refresh_token"):
+              sys.exit("No refresh token returned (offline scope missing)")
+          sb_set_secret("whoop_refresh_token", tok["refresh_token"])
+          print("WHOOP connected!")
+          EOF
