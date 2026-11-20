@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Health Hub</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --page: #f4f4f2; --surface-1: #fcfcfb; --border: #e4e3df;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
+    --grid: #ecebe7;
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+    --good: #0f8a3c; --warn: #b77800; --bad: #c83a3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      color-scheme: dark;
+      --page: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --grid: #262624;
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+      --good: #3dbb6a; --warn: #e0a326; --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  .viz-root { background: var(--page); color: var(--text-primary); min-height: 100vh; padding: 20px 16px 40px; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .seg button { border: 0; background: none; color: var(--text-secondary); padding: 6px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
+  .seg button.on { background: var(--text-primary); color: var(--surface-1); }
+  .btn { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); padding: 7px 12px; border-radius: 8px; font: inherit; cursor: pointer; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .tile .lbl { font-size: 12px; color: var(--text-secondary); }
+  .tile .val { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .val small { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+  .tile .meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .card { min-width: 0; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 14px; margin: 0; }
+  .card .cap { font-size: 12px; color: var(--text-secondary); margin: 2px 0 10px; }
+  .chart { position: relative; height: 220px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--text-secondary); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--grid); }
+  .tablewrap { overflow-x: auto; }
+  #setup { max-width: 460px; margin: 40px auto; }
+  #setup label { display: block; font-size: 12px; color: var(--text-secondary); margin: 12px 0 4px; }
+  #setup input { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--page); color: var(--text-primary); font: inherit; }
+  .row { display: flex; gap: 8px; margin-top: 16px; }
+  .err { color: var(--bad); font-size: 13px; margin-top: 10px; }
+  .demo-banner { background: var(--surface-1); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+
+  <!-- Setup screen -->
+  <div id="setup" class="card hidden">
+    <h1>Health Hub</h1>
+    <p class="sub">Connect to your Supabase database. These stay saved on this device only.</p>
+    <label>Supabase project URL</label>
+    <input id="f-url" placeholder="https://abcd1234.supabase.co">
+    <label>Supabase anon (public) key</label>
+    <input id="f-key" placeholder="eyJhbGciOi…">
+    <label>Your app secret (the one in schema.sql)</label>
+    <input id="f-secret" type="password">
+    <div class="row">
+      <button class="btn" id="save">Connect</button>
+      <button class="btn" id="demo">Try demo data</button>
+    </div>
+    <div class="err" id="setup-err"></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dash" class="hidden">
+    <header>
+      <div>
+        <h1>Health Hub</h1>
+        <div class="sub" id="updated">—</div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="range">
+          <button data-d="7">7D</button><button data-d="30" class="on">30D</button><button data-d="60">60D</button>
+        </div>
+        <button class="btn" id="settings" title="Settings">⚙︎</button>
+      </div>
+    </header>
+    <div class="demo-banner hidden" id="demo-banner">Showing demo data. Tap ⚙︎ to connect your real database.</div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="grid">
+      <div class="card"><h2>Recovery</h2><div class="cap">WHOOP recovery %, daily</div><div class="chart"><canvas id="c-recovery"></canvas></div></div>
+      <div class="card"><h2>HRV</h2><div class="cap">Overnight heart-rate variability, ms</div><div class="chart"><canvas id="c-hrv"></canvas></div></div>
+      <div class="card full"><h2>Sleep</h2><div class="cap">Hours asleep by stage</div><div class="chart" style="height:250px"><canvas id="c-sleep"></canvas></div></div>
+      <div class="card"><h2>Resting heart rate</h2><div class="cap">bpm, lower is generally better</div><div class="chart"><canvas id="c-rhr"></canvas></div></div>
+      <div class="card"><h2>Day strain</h2><div class="cap">WHOOP strain, 0–21</div><div class="chart"><canvas id="c-strain"></canvas></div></div>
+      <div class="card"><h2>Steps</h2><div class="cap">Daily total (highest of Garmin / iPhone)</div><div class="chart"><canvas id="c-steps"></canvas></div></div>
+      <div class="card"><h2>Body Battery</h2><div class="cap">Garmin daily high</div><div class="chart"><canvas id="c-bb"></canvas></div></div>
+      <div class="card full"><h2>Workouts</h2><div class="cap">WHOOP and Garmin merged (same session counted once)</div>
+        <div class="tablewrap"><table><thead><tr><th>Date</th><th>Activity</th><th>Duration</th><th>Avg HR</th><th>Calories</th><th>Strain</th><th>Source</th></tr></thead><tbody id="wo"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const LS = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(n).trim();
+let RAW = null, DAYS = 30, CHARTS = {}, DEMO = false;
+
+/* ---------- merge sources into one row per day ---------- */
+const PRIORITY = {
+  recovery: ['whoop'], hrv: ['whoop','garmin','apple'], rhr: ['whoop','garmin','apple'],
+  sleep_min: ['whoop','garmin','apple'], deep_min: ['whoop','garmin'], rem_min: ['whoop','garmin'],
+  light_min: ['whoop','garmin'], awake_min: ['whoop','garmin'], sleep_score: ['whoop','garmin'],
+  strain: ['whoop'], body_battery: ['garmin'], stress: ['garmin'], resp_rate: ['whoop','garmin'],
+  spo2: ['whoop'], weight_kg: ['apple','garmin'],
+};
+const MAX_OF = ['steps','active_kcal','exercise_min'];
+
+function mergeDaily(rows) {
+  const by = {};
+  rows.forEach(r => { (by[r.date] ||= {})[r.source] = r; });
+  return Object.keys(by).sort().map(date => {
+    const s = by[date], out = { date, src: {} };
+    for (const [k, order] of Object.entries(PRIORITY)) {
+      for (const src of order) { const v = s[src]?.[k]; if (v != null) { out[k] = +v; out.src[k] = src; break; } }
+    }
+    for (const k of MAX_OF) {
+      let best = null;
+      for (const src of ['garmin','apple','whoop']) { const v = s[src]?.[k]; if (v != null && (best == null || +v > best)) { best = +v; out.src[k] = src; } }
+      if (best != null) out[k] = best;
+    }
+    return out;
+  });
+}
+
+function mergeWorkouts(ws) {
+  const garmin = ws.filter(w => w.source === 'garmin'), whoop = ws.filter(w => w.source === 'whoop');
+  const out = garmin.map(w => ({ ...w }));
+  whoop.forEach(w => {
+    const t = new Date(w.start_time).getTime();
+    const match = out.find(g => g.source === 'garmin' && Math.abs(new Date(g.start_time).getTime() - t) < 15 * 60e3);
+    if (match) { match.strain = w.strain; match.source = 'garmin + whoop'; }
+    else out.push({ ...w });
+  });
+  return out.sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+}
+
+/* ---------- formatting ---------- */
+const fmtH = m => m == null ? '—' : `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, '0')}m`;
+const fmtN = (v, d = 0) => v == null ? '—' : (+v).toLocaleString(undefined, { maximumFractionDigits: d });
+const dLabel = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const localISO = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const avg = a => { const f = a.filter(v => v != null); return f.length ? f.reduce((x, y) => x + y, 0) / f.length : null; };
+
+function recoveryStatus(v) {
+  if (v == null) return null;
+  if (v >= 67) return { c: css('--good'), t: '▲ Green' };
+  if (v >= 34) return { c: css('--warn'), t: '● Yellow' };
+  return { c: css('--bad'), t: '▼ Red' };
+}
+
+/* ---------- tiles ---------- */
+function renderTiles(days) {
+  const last = k => { for (let i = days.length - 1; i >= 0; i--) if (days[i][k] != null) return days[i]; return null; };
+  const base = (k) => avg(days.slice(-31, -1).map(d => d[k]));
+  const tile = (label, k, fmt, unit = '', extra = '') => {
+    const row = last(k), v = row?.[k], b = base(k);
+    const delta = (v != null && b != null) ? ` · 30d avg ${fmt(b)}${unit}` : '';
+    return `<div class="tile"><div class="lbl">${label}</div><div class="val">${fmt(v)}${v != null && unit ? `<small>${unit}</small>` : ''}</div>
+      <div class="meta">${row ? dLabel(row.date) : 'no data'}${delta}</div>${extra}</div>`;
+  };
+  const rec = last('recovery'), st = recoveryStatus(rec?.recovery);
+  $('tiles').innerHTML =
+    tile('Recovery', 'recovery', v => fmtN(v), '%', st ? `<div class="pill" style="color:${st.c}">${st.t}</div>` : '') +
+    tile('HRV', 'hrv', v => fmtN(v), 'ms') +
+    tile('Resting HR', 'rhr', v => fmtN(v), 'bpm') +
+    tile('Sleep', 'sleep_min', fmtH) +
+    tile('Strain', 'strain', v => fmtN(v, 1)) +
+    tile('Steps', 'steps', v => fmtN(v)) +
+    tile('Body Battery', 'body_battery', v => fmtN(v));
+}
+
+/* ---------- charts ---------- */
+function baseOpts(yTitle, extra = {}) {
+  const muted = css('--text-muted'), grid = css('--grid'), sec = css('--text-secondary');
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: css('--text-primary'), titleColor: css('--surface-1'), bodyColor: css('--surface-1'), padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4 },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: muted, maxRotation: 0, autoSkipPadding: 14 }, border: { color: grid } },
+      y: { grid: { color: grid }, ticks: { color: muted }, border: { display: false }, title: { display: !!yTitle, text: yTitle, color: sec } },
+    },
+    ...extra,
+  };
+}
+
+function lineChart(id, labels, data, color, unit, yOpts = {}) {
+  const opts = baseOpts('');
+  Object.assign(opts.scales.y, yOpts);
+  opts.plugins.tooltip.callbacks = { label: c => ` ${fmtN(c.parsed.y, 1)} ${unit}` };
+  return new Chart($(id), {
+    type: 'line',
+    data: { labels, datasets: [{ data, borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: labels.length > 31 ? 0 : 3, pointHoverRadius: 5, pointBorderColor: css('--surface-1'), pointBorderWidth: 2, tension: 0.3, spanGaps: true }] },
+    options: opts,
+  });
+}
+
+function barChart(id, labels, data, color, unit, yOpts = {}) {
+  const opts = baseOpts('');
+  Object.assign(opts.scales.y, yOpts);
+  opts.plugins.tooltip.callbacks = { label: c => ` ${fmtN(c.parsed.y, 1)} ${unit}` };
+  return new Chart($(id), {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color, borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'bottom', maxBarThickness: 18, borderColor: css('--surface-1'), borderWidth: { left: 1, right: 1 } }] },
+    options: opts,
+  });
+}
+
+function sleepChart(labels, days) {
+  const toH = k => days.map(d => d[k] != null ? +(d[k] / 60).toFixed(2) : null);
+  const surf = css('--surface-1');
+  const ds = [
+    ['Deep', 'deep_min', '--series-1'], ['REM', 'rem_min', '--series-2'],
+    ['Light', 'light_min', '--series-3'], ['Awake', 'awake_min', '--series-4'],
+  ].map(([label, k, c], i, arr) => ({
+    label, data: toH(k), backgroundColor: css(c), borderColor: surf, borderWidth: { top: 2 },
+    borderRadius: i === arr.length - 1 ? { topLeft: 4, topRight: 4 } : 0, borderSkipped: 'bottom', maxBarThickness: 22, stack: 's',
+  }));
+  const opts = baseOpts('');
+  opts.scales.x.stacked = true; opts.scales.y.stacked = true;
+  opts.scales.y.ticks.callback = v => v + 'h';
+  opts.plugins.legend = { display: true, position: 'top', align: 'start', labels: { color: css('--text-secondary'), boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 2 } };
+  opts.plugins.tooltip.callbacks = {
+    label: c => ` ${c.dataset.label}: ${fmtH(c.parsed.y * 60)}`,
+    footer: items => { const d = days[items[0].dataIndex]; return `Asleep: ${fmtH(d.sleep_min)}${d.sleep_score != null ? ` · Score ${fmtN(d.sleep_score)}` : ''}`; },
+  };
+  return new Chart($('c-sleep'), { type: 'bar', data: { labels, datasets: ds }, options: opts });
+}
+
+function render() {
+  Object.values(CHARTS).forEach(c => c.destroy()); CHARTS = {};
+  const all = mergeDaily(RAW.daily || []);
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - DAYS);
+  const cut = localISO(cutoff);
+  const days = all.filter(d => d.date > cut);
+  renderTiles(all);
+  const L = days.map(d => dLabel(d.date)), col = k => days.map(d => d[k] ?? null);
+
+  CHARTS.rec = lineChart('c-recovery', L, col('recovery'), css('--series-1'), '%', { min: 0, max: 100 });
+  CHARTS.hrv = lineChart('c-hrv', L, col('hrv'), css('--series-1'), 'ms');
+  CHARTS.sleep = sleepChart(L, days);
+  CHARTS.rhr = lineChart('c-rhr', L, col('rhr'), css('--series-1'), 'bpm');
+  CHARTS.strain = barChart('c-strain', L, col('strain'), css('--series-1'), '', { min: 0, max: 21 });
+  CHARTS.steps = barChart('c-steps', L, col('steps'), css('--series-1'), 'steps', { beginAtZero: true });
+  CHARTS.bb = lineChart('c-bb', L, col('body_battery'), css('--series-1'), '', { min: 0, max: 100 });
+
+  const wo = mergeWorkouts((RAW.workouts || []).filter(w => (w.date || '') > cut));
+  $('wo').innerHTML = wo.length ? wo.map(w => `<tr><td>${w.date ? dLabel(w.date) : '—'}</td><td>${w.sport || '—'}</td><td>${fmtH(w.duration_min)}</td>
+    <td>${fmtN(w.avg_hr)}</td><td>${fmtN(w.kcal)}</td><td>${fmtN(w.strain, 1)}</td><td style="color:var(--text-muted)">${w.source}</td></tr>`).join('')
+    : `<tr><td colspan="7" style="color:var(--text-muted)">No workouts in this range</td></tr>`;
+
+  const newest = (RAW.daily || []).reduce((m, r) => r.updated_at > m ? r.updated_at : m, '');
+  $('updated').textContent = DEMO ? 'Demo data' : newest ? `Last synced ${new Date(newest).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'No data yet';
+}
+
+/* ---------- data ---------- */
+async function load() {
+  const url = LS('hh_url'), key = LS('hh_key'), secret = LS('hh_secret');
+  const r = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/get_dashboard`, {
+    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json', ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}) },
+    body: JSON.stringify({ secret, days: 90 }),
+  });
+  if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+  return r.json();
+}
+
+function demoData() {
+  const daily = [], workouts = [], today = new Date();
+  let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  for (let i = 60; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i); const date = localISO(d);
+    const rec = Math.round(35 + rnd() * 60), sleep = 360 + rnd() * 140;
+    daily.push({ date, source: 'whoop', recovery: rec, hrv: Math.round(55 + rec * 0.4 + rnd() * 10), rhr: Math.round(60 - rec * 0.1 + rnd() * 4),
+      sleep_min: sleep, deep_min: sleep * 0.2, rem_min: sleep * 0.24, light_min: sleep * 0.56, awake_min: 20 + rnd() * 30, sleep_score: Math.round(65 + rnd() * 30),
+      strain: +(6 + rnd() * 12).toFixed(1), updated_at: new Date().toISOString() });
+    daily.push({ date, source: 'garmin', steps: Math.round(5000 + rnd() * 9000), body_battery: Math.round(45 + rec * 0.5), stress: Math.round(20 + rnd() * 25) });
+    daily.push({ date, source: 'apple', steps: Math.round(4000 + rnd() * 8000) });
+    if (rnd() > 0.45) {
+      const st = new Date(d); st.setHours(18, 30);
+      workouts.push({ source: 'garmin', external_id: 'g' + i, start_time: st.toISOString(), date, sport: rnd() > 0.5 ? 'Tennis' : 'Strength Training', duration_min: 45 + rnd() * 60, avg_hr: Math.round(120 + rnd() * 30), kcal: Math.round(300 + rnd() * 400) });
+      workouts.push({ source: 'whoop', external_id: 'w' + i, start_time: st.toISOString(), date, sport: 'tennis', strain: +(8 + rnd() * 7).toFixed(1) });
+    }
+  }
+  return { daily, workouts };
+}
+
+/* ---------- wiring ---------- */
+function showSetup(msg = '') {
+  $('dash').classList.add('hidden'); $('setup').classList.remove('hidden');
+  $('f-url').value = LS('hh_url') || ''; $('f-key').value = LS('hh_key') || ''; $('f-secret').value = LS('hh_secret') || '';
+  $('setup-err').textContent = msg;
+}
+function showDash() { $('setup').classList.add('hidden'); $('dash').classList.remove('hidden'); $('demo-banner').classList.toggle('hidden', !DEMO); render(); }
+
+async function start() {
+  if (!LS('hh_url') || !LS('hh_key') || !LS('hh_secret')) return showSetup();
+  try { RAW = await load(); DEMO = false; showDash(); }
+  catch (e) { showSetup('Could not load data: ' + e.message); }
+}
+
+$('save').onclick = () => { LS('hh_url', $('f-url').value.trim()); LS('hh_key', $('f-key').value.trim()); LS('hh_secret', $('f-secret').value.trim()); start(); };
+$('demo').onclick = () => { RAW = demoData(); DEMO = true; showDash(); };
+$('settings').onclick = () => showSetup();
+$('range').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+  DAYS = +b.dataset.d; [...$('range').children].forEach(x => x.classList.toggle('on', x === b)); render(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => RAW && render());
+if (location.hash === '#demo') { RAW = demoData(); DEMO = true; showDash(); } else start();
+</script>
+</body>
+</html>
