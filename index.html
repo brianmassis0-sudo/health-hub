@@ -86,8 +86,18 @@
   .wk.sel .wk-d, .wk.sel .wk-m { color: var(--surface-1); }
   .wk-d { font-size: 11px; color: var(--text-muted); } .wk-i { font-size: 15px; } .wk-m { font-size: 12px; color: var(--text-secondary); min-height: 16px; }
   .macros { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .macros div { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; }
+  .macros > div { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; }
   .macros b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; } .macros span { font-size: 11px; color: var(--text-muted); }
+  .macros b small { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+  .mbar { height: 4px; border-radius: 2px; background: var(--grid); margin: 5px 6px 3px; overflow: hidden; }
+  .mbar span { display: block; height: 100%; background: var(--series-1); border-radius: 2px; }
+  .meal { border-bottom: 1px solid var(--grid); padding: 7px 0; }
+  .meal-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; cursor: pointer; }
+  .meal-h input { accent-color: var(--series-1); width: 16px; height: 16px; flex: none; }
+  .meal-n { font-size: 13.5px; font-weight: 600; flex: 1; } .meal-n em { font-weight: 400; color: var(--text-muted); font-size: 12px; }
+  .meal-m { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .meal-i { font-size: 12.5px; color: var(--text-secondary); margin: 2px 0 0 24px; }
+  .meal.done .meal-n, .meal.done .meal-i { color: var(--text-muted); text-decoration: line-through; }
   .mob-sub { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 2px; }
   .hidden { display: none !important; }
 </style>
@@ -250,6 +260,32 @@ const PLAN = {
   0: { title: 'Rest', icon: '😴', type: 'rest', time: 'Recovery',
        items: ['Optional walk / mobility', 'Prep for next week'] },
 };
+const MEALS = [
+  { name: 'Breakfast · overnight oats', icon: '🥣', p: 46, c: 47, f: 5,
+    items: ['40 g oats (dry)', '1 scoop whey', '170 g nonfat Greek yogurt', '80 g berries'] },
+  { name: 'Lunch', icon: '🍗', p: 50, c: 44, f: 11,
+    items: ['145 g chicken breast', '130 g jasmine rice', '100 g vegetables', '5 g olive oil'] },
+  { name: 'Pre-workout', icon: '🍌', p: 3, c: 62, f: 1, pre: true,
+    items: ['1 medium banana', '2½ rice cakes', '1 serving BPN G.1.M Sport+'] },
+  { name: 'Dinner', icon: '🥩', p: 66, c: 47, f: 37,
+    items: ['230 g 96/4 ground beef', '165 g sweet potato', '100 g vegetables', '70 g avocado', '13–14 g olive oil'] },
+];
+const kcalOf = m => Math.round(m.p * 4 + m.c * 4 + m.f * 9);
+
+function mealsHTML(checked, isRest) {
+  const eaten = MEALS.reduce((a, m, i) => checked['meal' + i] ? { p: a.p + m.p, c: a.c + m.c, f: a.f + m.f } : a, { p: 0, c: 0, f: 0 });
+  const eatenK = Math.round(eaten.p * 4 + eaten.c * 4 + eaten.f * 9);
+  const bar = (v, t) => `<div class="mbar"><span style="width:${Math.min(100, v / t * 100)}%"></span></div>`;
+  const tiles = [['kcal', eatenK, MACROS.kcal, ''], ['protein', eaten.p, MACROS.protein, 'g'], ['carbs', eaten.c, MACROS.carbs, 'g'], ['fat', eaten.f, MACROS.fat, 'g']]
+    .map(([l, v, t, u]) => `<div><b>${v.toLocaleString()}<small>/${t.toLocaleString()}${u}</small></b>${bar(v, t)}<span>${l}</span></div>`).join('');
+  const meals = MEALS.map((m, i) => `<div class="meal${checked['meal' + i] ? ' done' : ''}">
+      <label class="meal-h"><input type="checkbox" data-i="meal${i}" ${checked['meal' + i] ? 'checked' : ''}>
+        <span class="meal-n">${m.icon} ${m.name}${m.pre && isRest ? ' <em>(optional on rest day)</em>' : ''}</span>
+        <span class="meal-m">${m.p}P · ${m.c}C · ${m.f}F · ${kcalOf(m)} kcal</span></label>
+      <div class="meal-i">${m.items.join(' · ')}</div></div>`).join('');
+  return `<div class="macros">${tiles}</div><div class="hint" style="margin:4px 0 8px">Tick meals as you eat them. Weights are cooked unless noted.</div>${meals}`;
+}
+
 const MOB = {
   upperPre: ['Band pull-aparts 2×15', 'Open-book T-spine rotations 8/side', 'Scap push-ups ×10', 'Arm circles + cross-body swings 30s', 'Light warm-up sets of the first lift'],
   lowerPre: ['90/90 hip switches 8/side', "World's greatest stretch 5/side", 'Ankle rocks 10/side', 'Glute bridges ×12', 'Paused bodyweight squats ×10'],
@@ -352,13 +388,11 @@ function renderCoach(all, workouts) {
     <div class="coach-sum">${!isTodayView ? `Planned session for ${dayName}. On the day, this card will adjust it to your recovery.` : score == null ? 'Sync a few days of data for recovery-based adjustments. Follow the plan as written for now.' : adjustFor(plan, level)}</div>
     <div class="coach-grid">
       <div><div class="coach-lbl">Session checklist</div>${list}
-        ${plan.run ? `<div class="hint">🏃 ${isTodayView ? runAdjust(level) : runAdjust('warn')}</div>` : ''}${plan.hr ? `<div class="hint">❤️ ${plan.hr}</div>` : ''}</div>
+        ${plan.run ? `<div class="hint">🏃 ${isTodayView ? runAdjust(level) : runAdjust('warn')}</div>` : ''}${plan.hr ? `<div class="hint">❤️ ${plan.hr}</div>` : ''}
+        <div class="coach-lbl" style="margin-top:16px">🧘 Mobility</div>${mobilityHTML(vd.getDay(), checked, isTodayView ? level : 'warn')}</div>
       <div>
         <div class="coach-lbl">This week · ${wk.done}/${wk.due} done · tap a day to view</div>${wk.html}
-        <div class="coach-lbl" style="margin-top:14px">Daily fuel</div>
-        <div class="macros"><div><b>${MACROS.kcal.toLocaleString()}</b><span>kcal</span></div><div><b>${MACROS.protein}g</b><span>protein</span></div><div><b>${MACROS.carbs}g</b><span>carbs</span></div><div><b>${MACROS.fat}g</b><span>fat</span></div></div>
-        ${plan.type !== 'rest' ? '<div class="hint">Put most of your carbs in the meals before and after training.</div>' : ''}
-        <div class="coach-lbl" style="margin-top:16px">🧘 Mobility</div>${mobilityHTML(vd.getDay(), checked, isTodayView ? level : 'warn')}
+        <div class="coach-lbl" style="margin-top:14px">🍽️ Meals · eaten vs target</div>${mealsHTML(checked, plan.type === 'rest')}
       </div>
     </div>
     ${tips.length && isTodayView ? `<ul style="margin-top:14px">${tips.slice(0, 4).map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul>` : ''}
@@ -371,6 +405,7 @@ function renderCoach(all, workouts) {
   const back = $('back-today'); if (back) back.onclick = () => { VIEW = null; renderCoach(all, workouts); };
   $('coach').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
     checked[cb.dataset.i] = cb.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) {}
+    if (cb.dataset.i.startsWith('meal')) renderCoach(all, workouts);
   });
 }
 
